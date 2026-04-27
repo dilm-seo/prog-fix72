@@ -1,0 +1,21 @@
+# Build artifacts
+**/bin/
+**/obj/
+dist/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Claude Code internal
+.claude/
+
+# Logs
+*.log
+
+# OS
+Thumbs.db
+.DS_Store

@@ -1,0 +1,362 @@
+Cahier des Charges — Fix72 Agent
+Application de surveillance PC client — Édition Technicien Indépendant
+Version 1.0 — Fix72 / Etienne Aubry
+
+1. Contexte et objectifs
+1.1 Contexte
+Fix72 est une activité de dépannage informatique indépendante basée au Mans (72), intervenant auprès de particuliers et de TPE/PME sur toute la Sarthe. La majorité des clients sont des utilisateurs non-techniques qui constatent les pannes trop tard — souvent après une perte de données ou un blocage total.
+
+1.2 Problème à résoudre
+Les clients ne surveillent pas leur PC et découvrent les problèmes au pire moment
+Joindre le technicien en urgence n'est pas toujours intuitif pour des utilisateurs peu à l'aise
+Il n'existe pas de lien permanent entre le client et Fix72 entre deux interventions
+Les abonnés au Forfait Sérénité n'ont pas de point d'entrée simple pour déclencher leur téléassistance mensuelle
+1.3 Objectifs du logiciel
+Surveiller passivement la santé du PC et alerter le client en langage simple, avant la panne
+Offrir un accès immédiat au technicien (appel, message, téléassistance)
+Renforcer la présence Fix72 au quotidien sur le poste du client
+Générer des demandes d'intervention au moment opportun (alerte = besoin identifié)
+Fidéliser les abonnés Forfait Sérénité avec une interface dédiée
+2. Public cible
+Profil	Description
+Particulier senior	55–80 ans, peu à l'aise avec l'informatique, PC Windows, connexion ADSL/Fibre
+Particulier actif	30–55 ans, utilisation bureautique, photothèque personnelle, imprimante
+TPE / artisan	PC de caisse ou de gestion, pas de DSI, besoin de réactivité
+Abonné Sérénité	Déjà client Fix72, abonnement 15€/mois actif
+Contrainte design absolue : l'interface doit être compréhensible par quelqu'un qui ne sait pas ce qu'est un "processus" ou un "registre". Zéro jargon technique visible.
+
+3. Fonctionnalités
+3.1 Surveillance système (cœur du produit)
+Le logiciel tourne en arrière-plan et analyse en continu les indicateurs suivants :
+
+3.1.1 Espace disque
+Surveille tous les volumes montés (C:, D:, clé USB si présente)
+Seuil alerte jaune : < 15 % d'espace libre
+Seuil alerte rouge : < 5 % d'espace libre
+Message affiché : "Votre disque C: est presque plein (4 Go restants). Cela peut ralentir votre ordinateur."
+3.1.2 Température processeur
+Lecture via capteurs matériels (LibreHardwareMonitor en composant embarqué)
+Seuil alerte jaune : > 80°C en charge
+Seuil alerte rouge : > 90°C
+Message : "Votre ordinateur chauffe trop. Vérifiez que les aérations ne sont pas obstruées."
+Si capteur indisponible : fonctionnalité silencieusement désactivée
+3.1.3 Mémoire RAM
+Calcul de l'utilisation moyenne sur 5 minutes glissantes
+Seuil alerte : > 90 % en usage soutenu pendant > 3 min
+Message : "Votre ordinateur manque de mémoire. Fermez des applications ou redémarrez."
+3.1.4 Mises à jour Windows
+Interrogation de l'API Windows Update (COM IUpdateSession)
+Alerte douce si mises à jour importantes en attente depuis > 7 jours
+Alerte forte si mises à jour de sécurité critiques depuis > 14 jours
+Message : "Des mises à jour importantes attendent. Votre sécurité peut être compromise."
+Bouton "Lancer les mises à jour" dans la notification
+3.1.5 Antivirus
+Interrogation WMI AntiVirusProduct (SecurityCenter2)
+Vérification que Windows Defender ou un antivirus tiers est actif et à jour
+Alerte si antivirus désactivé ou base de données > 3 jours sans mise à jour
+Message : "Votre protection antivirus est inactive. Votre ordinateur est exposé."
+3.1.6 Démarrage lent
+Mesure du temps de boot via les journaux événements Windows (Event ID 100 — Kernel-Boot)
+Comparaison avec baseline enregistrée à l'installation
+Alerte si démarrage > 2× la baseline historique
+Message : "Votre ordinateur démarre 2 fois plus lentement que d'habitude."
+3.1.7 Santé disque (SMART)
+Lecture des données SMART via WMI MSStorageDriver_FailurePredictStatus
+Alerte rouge immédiate si prédiction de défaillance détectée
+Message : "Attention : votre disque dur montre des signes de défaillance. Sauvegardez vos données maintenant." + bouton "Appeler Fix72 maintenant"
+3.2 Icône systray
+L'icône réside dans la zone de notification Windows (System Tray, coin bas-droite).
+
+États visuels de l'icône
+État	Icône	Description
+Tout va bien	Shield vert Fix72	Aucune alerte active
+Avertissement	Shield orange	1+ alertes niveau jaune
+Urgent	Shield rouge clignotant	1+ alertes niveau rouge
+Abonné Sérénité	Shield violet avec étoile	Abonnement actif détecté
+Menu clic droit
+🛡️ Fix72 Agent  [version]
+─────────────────────────
+📊 Voir l'état de mon PC
+📞 Appeler Etienne — 06 64 31 34 74
+💬 Envoyer un message
+🖥️ Démarrer une téléassistance
+─────────────────────────
+⚙️ Paramètres
+❓ À propos
+✕ Quitter
+Double-clic sur l'icône
+Ouvre la fenêtre principale (tableau de bord).
+
+3.3 Tableau de bord principal
+Fenêtre native Windows (~480×580px), non redimensionnable, centrée à l'ouverture.
+
+Disposition
+En-tête
+
+Logo Fix72 + nom du client (configurable à l'installation)
+Badge "Forfait Sérénité actif" si détecté (vert/violet), sinon absent
+Section "État de votre PC"
+Grille de tuiles colorées, une par indicateur surveillé :
+
+┌─────────────────┬─────────────────┐
+│  💾 Disque dur  │  🌡️ Température │
+│  ✅ OK          │  ⚠️ Chaud       │
+│  87 Go libres   │  83°C           │
+├─────────────────┼─────────────────┤
+│  🧠 Mémoire     │  🔄 Mises à jour│
+│  ✅ OK          │  🔴 En attente  │
+│  3.2 Go libres  │  4 depuis 12j   │
+├─────────────────┼─────────────────┤
+│  🛡️ Antivirus   │  ⚡ Démarrage   │
+│  ✅ Actif       │  ✅ Normal      │
+│  À jour         │  28 secondes    │
+└─────────────────┴─────────────────┘
+Cliquer sur une tuile en alerte → popup explicatif + bouton d'action.
+
+Section "Contacter Fix72"
+
+┌──────────────────────────────────────┐
+│  📞  Appeler maintenant              │  ← bouton principal, couleur Fix72
+│       06 64 31 34 74                 │
+├──────────────────────────────────────┤
+│  🖥️  Démarrer téléassistance        │  ← lance AnyDesk et envoie l'ID
+│  💬  Envoyer un message              │  ← ouvre formulaire ou WhatsApp
+└──────────────────────────────────────┘
+Pied de page
+
+Dernière vérification : "Il y a 4 minutes"
+Lien "fix72.com"
+Version du logiciel
+3.4 Notifications Windows
+Utilisation des notifications natives Windows 10/11 (Toast Notifications).
+
+Règles d'affichage
+Maximum 1 notification toutes les 4 heures par type d'alerte (anti-spam)
+Les alertes rouges ignorent ce délai et s'affichent immédiatement
+Aucune notification la nuit (22h–8h) sauf alerte SMART critique
+L'utilisateur peut désactiver les notifications par type dans les paramètres
+Structure d'une notification
+[Logo Fix72]  Fix72 Agent
+Votre disque C: est presque plein
+4 Go restants — votre PC peut ralentir
+[Voir les détails]  [Appeler Fix72]
+3.5 Téléassistance en un clic
+Fonctionnalité phare pour les abonnés Sérénité.
+
+Flux "Démarrer une téléassistance" :
+
+L'utilisateur clique "Démarrer une téléassistance"
+Le logiciel vérifie si AnyDesk est installé :
+Si oui → le lance
+Si non → le télécharge silencieusement et le lance
+Récupère l'ID AnyDesk via l'API locale AnyDesk (anydesk --get-id)
+Affiche une popup avec l'ID en grand, en clair :
+Votre code de connexion :
+     123 456 789
+Communiquez ce code à Etienne
+[Copier]  [Appeler maintenant]
+Option : envoie automatiquement l'ID par webhook vers fix72.com (si le client a un compte)
+3.6 Paramètres
+Fenêtre accessible depuis le menu systray.
+
+Paramètre	Type	Défaut
+Nom du client	Texte	Configuré à l'installation
+Démarrer avec Windows	Booléen	Oui
+Notifications activées	Booléen	Oui
+Notifications la nuit	Booléen	Non
+Fréquence de vérification	5 / 15 / 30 min	15 min
+Notifications disque	Booléen	Oui
+Notifications température	Booléen	Oui
+Notifications mises à jour	Booléen	Oui
+Numéro de téléphone affiché	Texte	06 64 31 34 74
+Identifiant client Fix72	Texte	Optionnel
+3.7 Mise à jour automatique
+Le logiciel vérifie une URL de manifest JSON au démarrage et toutes les 24h :
+https://fix72.com/agent/version.json
+{ "version": "1.2.0", "url": "https://fix72.com/agent/Fix72Agent-setup.exe", "notes": "Correctif antivirus Defender" }
+Si une nouvelle version est disponible : notification discrète "Une mise à jour Fix72 Agent est disponible" avec bouton "Mettre à jour"
+La mise à jour se télécharge en arrière-plan, s'installe à la prochaine fermeture de session
+Aucune mise à jour forcée sans accord de l'utilisateur
+4. Architecture technique
+4.1 Langage et framework recommandés
+Option A — Recommandée : C# .NET 8 / WinForms
+
+Natif Windows, binaire léger (~8–15 Mo installé)
+NotifyIcon pour le systray
+LibreHardwareMonitor (NuGet) pour la température et SMART
+Microsoft.Toolkit.Uwp.Notifications (NuGet) pour les toasts Windows 11
+WMI via System.Management pour antivirus et mises à jour
+Déploiement : installateur NSIS ou Inno Setup (génère un .exe signable)
+Option B : Python + PyInstaller
+
+Développement plus rapide, pystray, psutil, wmi, plyer
+Binaire plus lourd (~50–80 Mo) après PyInstaller
+Moins propre pour les notifications Windows 11
+Adapté si le dev maîtrise mieux Python
+Option C : Electron / Node.js
+
+À éviter : ~200 Mo installés, consommation RAM excessive pour ce cas d'usage
+→ Recommandation : Option A (C# .NET 8)
+
+4.2 Structure du projet (C#)
+Fix72Agent/
+├── Program.cs                 # Point d'entrée, mutex instance unique
+├── TrayApplication.cs         # NotifyIcon, menu, gestion états
+├── MainDashboard.cs           # Fenêtre tableau de bord (WinForms)
+├── Monitors/
+│   ├── DiskMonitor.cs
+│   ├── TemperatureMonitor.cs
+│   ├── RamMonitor.cs
+│   ├── WindowsUpdateMonitor.cs
+│   ├── AntivirusMonitor.cs
+│   ├── SmartMonitor.cs
+│   └── BootTimeMonitor.cs
+├── Services/
+│   ├── NotificationService.cs
+│   ├── AnyDeskService.cs
+│   ├── UpdateService.cs
+│   └── SettingsService.cs
+├── Models/
+│   ├── MonitorResult.cs
+│   └── AppSettings.cs
+├── Resources/
+│   ├── icon_green.ico
+│   ├── icon_orange.ico
+│   ├── icon_red.ico
+│   └── logo_fix72.png
+└── Setup/
+    └── Fix72Agent.iss         # Script Inno Setup
+4.3 Persistance des données
+Paramètres : fichier settings.json dans %APPDATA%\Fix72Agent\
+Logs : fichier rotatif agent.log (max 5 Mo), même dossier
+Baseline boot : valeur stockée dans settings.json à l'installation
+4.4 Démarrage automatique avec Windows
+Clé registre : HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+Valeur : "Fix72Agent" = "C:\Program Files\Fix72Agent\Fix72Agent.exe --minimized"
+Configurable depuis les paramètres (activé par défaut)
+4.5 Instance unique
+Mutex nommé "Fix72AgentSingleInstance" au démarrage
+Si déjà lancé : focus sur la fenêtre existante et quitte la nouvelle instance
+5. Installation et distribution
+5.1 Installateur
+Généré avec Inno Setup (gratuit, standard industrie).
+
+Contenu de l'installateur (Fix72Agent-setup.exe) :
+
+Wizard simplifié (2 écrans max) : Bienvenue → Installation → Fin
+Champ "Votre prénom" (pré-remplit le nom client affiché)
+Installe dans C:\Program Files\Fix72Agent\
+Crée un raccourci dans le menu Démarrer
+Ajoute la clé de démarrage automatique
+Lance le logiciel à la fin de l'installation
+Taille cible de l'installateur : < 20 Mo
+
+5.2 Signature du code
+Le .exe et l'installateur doivent être signés numériquement pour éviter l'alerte SmartScreen Windows
+Options : certificat de signature de code Sectigo (~60€/an) ou COMODO
+Sans signature : alerte "Éditeur inconnu" lors de l'installation — acceptable en phase bêta, bloquant à terme
+5.3 Distribution
+Canal	Méthode
+Clients directs	Lien de téléchargement personnalisé envoyé par SMS/email post-intervention
+Site Fix72	Page /telecharger-agent avec bouton de téléchargement
+Pré-installation	Etienne installe directement lors d'une intervention à domicile (recommandé)
+Abonnés Sérénité	Inclus comme avantage exclusif du forfait
+5.4 Désinstallation
+Via "Applications" Windows (entrée "Fix72 Agent" dans Ajout/Suppression)
+Supprime les fichiers, la clé registre, le raccourci menu démarrer
+Ne supprime pas le dossier %APPDATA%\Fix72Agent\ (logs et paramètres conservés)
+6. Sécurité et vie privée
+6.1 Ce que le logiciel collecte
+Donnée	Stockage	Transmission
+Métriques système (disque, RAM, temp.)	Local uniquement	Jamais sans accord explicite
+Nom du client	Local (settings.json)	Jamais
+ID AnyDesk	Généré à la demande	Seulement si "Envoyer à Fix72" activé
+Logs d'erreurs	Local (agent.log)	Jamais automatiquement
+6.2 Ce que le logiciel ne fait PAS
+Pas d'accès aux fichiers personnels
+Pas d'activation de la caméra ou du micro
+Pas de keylogger
+Pas de transmission de données sans action explicite de l'utilisateur
+Pas d'accès Internet sauf : vérification de mise à jour (manifest JSON) et envoi ID AnyDesk si explicitement activé
+6.3 Conformité RGPD
+Aucune donnée personnelle transmise sans consentement explicite
+Mention dans le wizard d'installation : "Ce logiciel ne transmet aucune donnée personnelle. Il surveille uniquement les performances techniques de votre ordinateur."
+Droit à la suppression : la désinstallation supprime toutes les données
+7. Performances et compatibilité
+7.1 Compatibilité Windows
+Version	Support
+Windows 11	Complet
+Windows 10 (1903+)	Complet
+Windows 10 (avant 1903)	Partiel (pas de Toast notifications modernes)
+Windows 8/8.1	Non supporté
+Windows 7	Non supporté
+7.2 Ressources système cibles
+Indicateur	Cible
+RAM au repos	< 40 Mo
+CPU au repos	< 0,5 %
+CPU lors d'une vérification	< 3 % pendant < 2 secondes
+Espace disque installé	< 25 Mo
+Accès réseau	< 1 Ko/24h (manifest mise à jour uniquement)
+7.3 Architecture CPU
+Build x64 (principal)
+Build x86 optionnel (pour vieux PC 32 bits encore rencontrés chez des seniors)
+Pas d'ARM64 requis en v1
+8. Phases de développement
+Phase 1 — MVP (6–8 semaines)
+non terminé
+Icône systray avec 3 états (OK / Warning / Error)
+non terminé
+Menu clic droit avec appel téléphonique et lien site
+non terminé
+Surveillance disque + RAM + Windows Update
+non terminé
+Notifications Toast basiques
+non terminé
+Fenêtre tableau de bord simple
+non terminé
+Installateur Inno Setup fonctionnel
+non terminé
+Démarrage automatique avec Windows
+Phase 2 — Complet (4–6 semaines supplémentaires)
+non terminé
+Surveillance température + SMART
+non terminé
+Surveillance antivirus
+non terminé
+Détection démarrage lent
+non terminé
+Téléassistance en 1 clic (AnyDesk auto)
+non terminé
+Mise à jour automatique
+non terminé
+Paramètres complets
+non terminé
+Signature code
+Phase 3 — Sérénité (optionnel, post-lancement)
+non terminé
+Connexion API fix72.com (vérification statut abonnement)
+non terminé
+Badge Sérénité dans l'interface
+non terminé
+Envoi automatique rapport hebdomadaire par email au client
+non terminé
+Dashboard admin Fix72 pour voir l'état de tous les agents déployés
+9. Critères de recette
+Le logiciel sera considéré livrable lorsque :
+
+Installation : un utilisateur non-technique installe le .exe seul en moins de 2 minutes sans aide
+Démarrage : le logiciel démarre avec Windows sans intervention manuelle
+Alertes : une alerte disque se déclenche correctement sur un disque rempli à > 85 %
+Performances : RAM < 40 Mo et CPU < 0,5 % confirmés avec Task Manager après 1h de fonctionnement
+Stabilité : aucun crash sur 7 jours de fonctionnement continu sur Windows 10 et 11
+Appel téléphonique : le bouton "Appeler" ouvre bien le numéroteur Windows avec le bon numéro
+Désinstallation : propre, sans trace dans les programmes au démarrage
+10. Livrables attendus du développeur
+Livrable	Format
+Code source versionné	Dépôt Git (GitHub/GitLab privé)
+Installateur final	Fix72Agent-setup.exe
+Documentation technique	README.md dans le dépôt
+Guide de personnalisation	Comment modifier le numéro de téléphone, le logo, l'URL du manifest
+Script de build	Automatise la compilation + génération de l'installateur en 1 commande
+Fix72 — Etienne Aubry — fix72.com — 06 64 31 34 74
+Document v1.0 — Avril 2026
