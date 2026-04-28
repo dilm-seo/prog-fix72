@@ -43,6 +43,12 @@ public class AppSettings
     public bool WeeklyHeartbeatEnabled { get; set; } = true;
     public string LastHeartbeatSent { get; set; } = "";
 
+    // Mise à jour automatique — vérifie les releases GitHub et installe silencieusement.
+    public bool AutoUpdateEnabled { get; set; } = true;
+    // Intervalle de vérification des mises à jour (heures). 24 h par défaut.
+    public int UpdateCheckIntervalHours { get; set; } = 24;
+    public string LastUpdateCheck { get; set; } = "";
+
     // Alertes critiques immédiates : envoi dès qu'un nouveau capteur passe en rouge.
     public bool ImmediateCriticalAlertsEnabled { get; set; } = true;
 

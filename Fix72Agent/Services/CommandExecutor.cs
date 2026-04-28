@@ -19,15 +19,19 @@ public class CommandExecutor
 
     private readonly Action _onForceCheck;
     private readonly Action<string, string> _showNotification;
+    private readonly Func<CancellationToken, Task<bool>>? _onCheckUpdate;
 
-    /// <summary>
-    /// </summary>
     /// <param name="onForceCheck">Callback : déclenche un re-scan immédiat des capteurs.</param>
     /// <param name="showNotification">Callback : affiche une bulle dans la zone de notif (titre, message).</param>
-    public CommandExecutor(Action onForceCheck, Action<string, string> showNotification)
+    /// <param name="onCheckUpdate">Callback optionnel : déclenche une vérification + install de mise à jour.</param>
+    public CommandExecutor(
+        Action onForceCheck,
+        Action<string, string> showNotification,
+        Func<CancellationToken, Task<bool>>? onCheckUpdate = null)
     {
         _onForceCheck = onForceCheck;
         _showNotification = showNotification;
+        _onCheckUpdate = onCheckUpdate;
     }
 
     public async Task<ExecutionResult> ExecuteAsync(string command, JsonElement parameters, CancellationToken ct = default)
@@ -47,6 +51,7 @@ public class CommandExecutor
                 "winget_upgrade"          => await HandleWingetUpgradeAsync(ct),
                 "list_top_processes"      => HandleListTopProcesses(),
                 "kill_process"            => HandleKillProcess(parameters),
+                "check_update"            => await HandleCheckUpdateAsync(ct),
                 _                         => new ExecutionResult("failed", null, $"Commande inconnue : {command}")
             };
         }
@@ -537,6 +542,16 @@ public class CommandExecutor
             new { killed_count = killed.Count, failed_count = failed.Count, killed, failed },
             failed.Count > 0 && killed.Count == 0 ? "Tous les kills ont échoué (peut-être process admin)." : null
         );
+    }
+
+    // ── check_update ────────────────────────────────────────────────
+    private async Task<ExecutionResult> HandleCheckUpdateAsync(CancellationToken ct)
+    {
+        if (_onCheckUpdate == null)
+            return new ExecutionResult("failed", null, "Auto-update non configuré sur cet agent");
+
+        var launched = await _onCheckUpdate(ct);
+        return new ExecutionResult("done", new { update_launched = launched }, null);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────

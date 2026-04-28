@@ -12,12 +12,14 @@ public class TrayApplication : ApplicationContext
     private readonly NotifyIcon _trayIcon;
     private readonly System.Windows.Forms.Timer _timer;
     private readonly System.Windows.Forms.Timer _commandPollTimer;
+    private readonly System.Windows.Forms.Timer _updateTimer;
     private readonly List<IMonitor> _monitors;
     private readonly SettingsService _settings;
     private readonly AgentAuthService _auth;
     private readonly Fix72ApiClient _api;
     private readonly WebhookReporter _webhook;
     private readonly CommandExecutor _commandExec;
+    private readonly AutoUpdater _updater;
     private readonly Icon _iconGreen;
     private readonly Icon _iconOrange;
     private readonly Icon _iconRed;
@@ -37,9 +39,13 @@ public class TrayApplication : ApplicationContext
         _auth = new AgentAuthService();
         _api = new Fix72ApiClient(settings, _auth);
         _webhook = new WebhookReporter(settings, _api);
+        _updater = new AutoUpdater(
+            showBalloon: (title, msg, warn) =>
+                ShowBalloon(title, msg, warn ? ToolTipIcon.Warning : ToolTipIcon.Info));
         _commandExec = new CommandExecutor(
             onForceCheck: () => _ = CheckAllAsync(),
-            showNotification: (title, msg) => ShowBalloon(title, msg, ToolTipIcon.Info)
+            showNotification: (title, msg) => ShowBalloon(title, msg, ToolTipIcon.Info),
+            onCheckUpdate: ct => _updater.CheckAndUpdateAsync(manualCheck: false, ct: ct)
         );
         _monitors = new List<IMonitor>
         {
@@ -92,6 +98,23 @@ public class TrayApplication : ApplicationContext
             {
                 await Task.Delay(5000);
                 await PollCommandsAsync();
+            });
+        }
+
+        // Vérification automatique des mises à jour
+        _updateTimer = new System.Windows.Forms.Timer
+        {
+            Interval = Math.Max(1, _settings.Settings.UpdateCheckIntervalHours) * 3600 * 1000
+        };
+        _updateTimer.Tick += async (s, e) => await _updater.CheckAndUpdateAsync();
+        if (_settings.Settings.AutoUpdateEnabled)
+        {
+            _updateTimer.Start();
+            // Premier check 30 s après le démarrage (laisse le temps à l'app de s'initialiser)
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(30_000);
+                await _updater.CheckAndUpdateAsync();
             });
         }
 
@@ -165,6 +188,8 @@ public class TrayApplication : ApplicationContext
             menu.Items.Add("📧  Envoyer un rapport à Fix72", null, async (s, e) => await SendManualReportAsync());
 
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("🔄  Vérifier les mises à jour", null,
+            async (s, e) => await _updater.CheckAndUpdateAsync(manualCheck: true));
         menu.Items.Add("⚙️  Paramètres", null, (s, e) => OpenSettings());
         menu.Items.Add("❓  À propos", null, (s, e) => ShowAbout());
         menu.Items.Add(new ToolStripSeparator());
@@ -466,6 +491,7 @@ public class TrayApplication : ApplicationContext
     private void ExitApp()
     {
         _timer.Stop();
+        _updateTimer.Stop();
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
         Application.Exit();
