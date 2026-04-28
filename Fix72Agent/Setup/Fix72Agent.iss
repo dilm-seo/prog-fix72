@@ -2,7 +2,7 @@
 ; Documentation : https://jrsoftware.org/ishelp/
 
 #define AppName       "Fix72 Agent"
-#define AppVersion    "0.1.1"
+#define AppVersion    "0.1.2"
 #define AppPublisher  "Fix72 - Etienne Aubry"
 #define AppURL        "https://fix72.com"
 #define AppExeName    "Fix72Agent.exe"

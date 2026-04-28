@@ -84,6 +84,15 @@ public class TrayApplication : ApplicationContext
         if (_settings.Settings.RemoteCommandsEnabled && _api.IsConfigured)
         {
             _commandPollTimer.Start();
+            // Premier poll immédiat (sinon il faudrait attendre l'intervalle complet
+            // — 30 min par défaut — pour que la 1ère commande soit récupérée).
+            // Délai de 5 s pour laisser le temps à l'auto-registration via
+            // CheckAllAsync → SendAsync → /agent-ingest de créer la ligne agent.
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(5000);
+                await PollCommandsAsync();
+            });
         }
 
         _ = CheckAllAsync();
