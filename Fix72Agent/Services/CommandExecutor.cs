@@ -52,6 +52,7 @@ public class CommandExecutor
                 "list_top_processes"      => HandleListTopProcesses(),
                 "kill_process"            => HandleKillProcess(parameters),
                 "check_update"            => await HandleCheckUpdateAsync(ct),
+                "quick_virus_scan"        => await HandleQuickVirusScanAsync(ct),
                 _                         => new ExecutionResult("failed", null, $"Commande inconnue : {command}")
             };
         }
@@ -542,6 +543,65 @@ public class CommandExecutor
             new { killed_count = killed.Count, failed_count = failed.Count, killed, failed },
             failed.Count > 0 && killed.Count == 0 ? "Tous les kills ont échoué (peut-être process admin)." : null
         );
+    }
+
+    // ── quick_virus_scan ────────────────────────────────────────────
+    /// <summary>
+    /// Déclenche un scan rapide Windows Defender via MpCmdRun.exe.
+    /// Exit codes : 0 = propre, 2 = menaces détectées (et gérées par Defender), autre = erreur.
+    /// Timeout : 20 min (scan rapide typiquement 1–5 min).
+    /// </summary>
+    private async Task<ExecutionResult> HandleQuickVirusScanAsync(CancellationToken ct)
+    {
+        var mpCmdRun = FindMpCmdRun();
+        if (mpCmdRun == null)
+            return new ExecutionResult("failed", null,
+                "Windows Defender introuvable (MpCmdRun.exe manquant).");
+
+        var (code, stdout, stderr) = await RunCaptureAsync(
+            mpCmdRun, "-Scan -ScanType 1", TimeSpan.FromMinutes(20), ct);
+
+        bool threatsFound = code == 2;
+        bool clean = code == 0;
+
+        // Détails des menaces si Defender en a trouvé
+        string? threatsJson = null;
+        if (threatsFound)
+        {
+            try
+            {
+                var (psc, psout, _) = await RunCaptureAsync(
+                    "powershell",
+                    "-NoProfile -NonInteractive -Command " +
+                    "\"Get-MpThreatDetection | Select-Object -First 10 ThreatName, ActionSuccess, Resources | " +
+                    "ConvertTo-Json -Compress\"",
+                    TimeSpan.FromSeconds(30), ct);
+                if (psc == 0 && !string.IsNullOrWhiteSpace(psout))
+                    threatsJson = psout.Trim();
+            }
+            catch { /* best-effort */ }
+        }
+
+        var combined = (stdout + "\n" + stderr).Trim();
+        var logTail = combined.Length > 3000 ? combined[^3000..] : combined;
+
+        Logger.Info($"quick_virus_scan : exit={code} threats={threatsFound}");
+
+        return new ExecutionResult(
+            clean || threatsFound ? "done" : "failed",
+            new { exit_code = code, clean, threats_found = threatsFound, threats_detail = threatsJson, log_tail = logTail },
+            clean || threatsFound ? null : $"Scan échoué (exit code {code})");
+    }
+
+    internal static string? FindMpCmdRun()
+    {
+        var candidates = new[]
+        {
+            Environment.ExpandEnvironmentVariables(@"%ProgramFiles%\Windows Defender\MpCmdRun.exe"),
+            @"C:\Program Files\Windows Defender\MpCmdRun.exe",
+            Environment.ExpandEnvironmentVariables(@"%ProgramFiles(x86)%\Windows Defender\MpCmdRun.exe"),
+        };
+        return candidates.FirstOrDefault(File.Exists);
     }
 
     // ── check_update ────────────────────────────────────────────────

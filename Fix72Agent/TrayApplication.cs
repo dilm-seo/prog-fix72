@@ -13,6 +13,7 @@ public class TrayApplication : ApplicationContext
     private readonly System.Windows.Forms.Timer _timer;
     private readonly System.Windows.Forms.Timer _commandPollTimer;
     private readonly System.Windows.Forms.Timer _updateTimer;
+    private readonly System.Windows.Forms.Timer _scanTimer;
     private readonly List<IMonitor> _monitors;
     private readonly SettingsService _settings;
     private readonly AgentAuthService _auth;
@@ -98,6 +99,20 @@ public class TrayApplication : ApplicationContext
             {
                 await Task.Delay(5000);
                 await PollCommandsAsync();
+            });
+        }
+
+        // Scan antivirus rapide périodique (vérifie toutes les 24 h si l'intervalle est écoulé)
+        _scanTimer = new System.Windows.Forms.Timer { Interval = 24 * 3600 * 1000 };
+        _scanTimer.Tick += async (s, e) => await RunPeriodicScanAsync();
+        if (_settings.Settings.QuickScanEnabled)
+        {
+            _scanTimer.Start();
+            // Premier passage 5 min après le démarrage — laisse l'app se stabiliser
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(5 * 60 * 1000);
+                await RunPeriodicScanAsync();
             });
         }
 
@@ -187,6 +202,7 @@ public class TrayApplication : ApplicationContext
         if (_webhook.IsConfigured)
             menu.Items.Add("📧  Envoyer un rapport à Fix72", null, async (s, e) => await SendManualReportAsync());
 
+        menu.Items.Add("🔍  Lancer un scan antivirus", null, async (s, e) => await RunManualScanAsync());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("🔄  Vérifier les mises à jour", null,
             async (s, e) => await _updater.CheckAndUpdateAsync(manualCheck: true));
@@ -488,9 +504,100 @@ public class TrayApplication : ApplicationContext
             MessageBoxIcon.Information);
     }
 
+    /// <summary>Vérifie l'intervalle et lance le scan si besoin. Appelé par le timer quotidien.</summary>
+    private async Task RunPeriodicScanAsync()
+    {
+        if (!_settings.Settings.QuickScanEnabled) return;
+
+        DateTime.TryParse(_settings.Settings.LastQuickScan, out var lastScan);
+        var interval = TimeSpan.FromDays(Math.Max(1, _settings.Settings.QuickScanIntervalDays));
+        if (DateTime.Now - lastScan < interval) return;
+
+        Logger.Info("Démarrage du scan antivirus rapide périodique...");
+        await ExecuteScanAsync(notifyIfClean: false);
+    }
+
+    /// <summary>Scan déclenché manuellement depuis le menu tray.</summary>
+    private async Task RunManualScanAsync()
+    {
+        ShowBalloon("Fix72 Agent", "Scan antivirus en cours…", ToolTipIcon.Info);
+        await ExecuteScanAsync(notifyIfClean: true);
+    }
+
+    private async Task ExecuteScanAsync(bool notifyIfClean)
+    {
+        var mpCmdRun = CommandExecutor.FindMpCmdRun();
+        if (mpCmdRun == null)
+        {
+            if (notifyIfClean)
+                ShowBalloon("Fix72 Agent", "Windows Defender introuvable sur ce PC.", ToolTipIcon.Warning);
+            Logger.Warn("ExecuteScanAsync : MpCmdRun.exe introuvable");
+            return;
+        }
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(20));
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = mpCmdRun,
+                Arguments = "-Scan -ScanType 1",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc == null) throw new Exception("Impossible de démarrer MpCmdRun.exe");
+            await proc.WaitForExitAsync(cts.Token);
+
+            bool threatsFound = proc.ExitCode == 2;
+            bool clean = proc.ExitCode == 0;
+
+            Logger.Info($"ExecuteScanAsync : exit={proc.ExitCode} threats={threatsFound}");
+
+            _settings.Settings.LastQuickScan = DateTime.Now.ToString("o");
+            try { _settings.Save(); } catch { /* best-effort */ }
+
+            if (threatsFound)
+            {
+                ShowBalloon(
+                    "Fix72 Agent — Alerte sécurité",
+                    "Des menaces ont été détectées et neutralisées par Windows Defender.",
+                    ToolTipIcon.Error);
+
+                if (_webhook.IsConfigured)
+                {
+                    var alert = new MonitorResult(
+                        "virus_scan", "Scan Antivirus", "🦠",
+                        AlertLevel.Critical, "Menaces !", "Scan rapide — menaces détectées",
+                        "Des menaces ont été détectées lors du scan antivirus rapide. " +
+                        "Windows Defender les a neutralisées. Vérifiez la Sécurité Windows pour plus de détails.",
+                        new MonitorAction("Ouvrir Sécurité Windows", "windowsdefender:"));
+                    await _webhook.SendImmediateCriticalAsync(alert, LatestResults);
+                }
+            }
+            else if (clean && notifyIfClean)
+            {
+                ShowBalloon("Fix72 Agent", "Scan terminé — aucune menace détectée.", ToolTipIcon.Info);
+            }
+            else if (!clean && !threatsFound)
+            {
+                Logger.Warn($"ExecuteScanAsync : exit code inattendu {proc.ExitCode}");
+                if (notifyIfClean)
+                    ShowBalloon("Fix72 Agent", "Scan antivirus terminé avec une erreur.", ToolTipIcon.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"ExecuteScanAsync : {ex.Message}");
+            if (notifyIfClean)
+                ShowBalloon("Fix72 Agent", "Scan antivirus échoué : " + ex.Message, ToolTipIcon.Warning);
+        }
+    }
+
     private void ExitApp()
     {
         _timer.Stop();
+        _scanTimer.Stop();
         _updateTimer.Stop();
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
