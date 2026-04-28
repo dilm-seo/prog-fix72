@@ -1,0 +1,99 @@
+name: Build & Release
+
+# Déclenché à chaque push sur main.
+# Crée (ou remplace) une release GitHub avec le tag v{Version} lu dans Fix72Agent.csproj.
+# Les agents déployés détectent cette release via l'API GitHub et s'auto-mettent à jour.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write   # nécessaire pour créer des releases
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      # ── Checkout ───────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── .NET SDK ───────────────────────────────────────────────────
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # ── Lire la version depuis le .csproj ──────────────────────────
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $xml = [xml](Get-Content Fix72Agent/Fix72Agent.csproj)
+          $ver = $xml.Project.PropertyGroup.Version | Select-Object -First 1
+          Write-Host "Version : $ver"
+          "VERSION=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      # ── Build (publish single-file, self-contained, x64) ──────────
+      - name: Build
+        shell: pwsh
+        run: |
+          dotnet publish Fix72Agent/Fix72Agent.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=none `
+            -p:DebugSymbols=false `
+            -o Fix72Agent/bin/Release/net8.0-windows/win-x64/publish
+
+      # ── Inno Setup ────────────────────────────────────────────────
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.version.outputs.VERSION }}"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DAppVersion=$ver" `
+            Fix72Agent/Setup/Fix72Agent.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # ── Vérifier que l'installateur existe ────────────────────────
+      - name: Check installer
+        shell: pwsh
+        run: |
+          $path = "dist\Fix72Agent-Setup.exe"
+          if (-not (Test-Path $path)) {
+            Write-Error "Installateur introuvable : $path"
+            exit 1
+          }
+          $size = [math]::Round((Get-Item $path).Length / 1MB, 1)
+          Write-Host "Installateur : $path ($size Mo)"
+
+      # ── Créer / remplacer la release GitHub ───────────────────────
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          TAG="v${VERSION}"
+          DATE=$(date -u '+%Y-%m-%d %H:%M UTC')
+
+          # Supprime la release existante (même tag) si elle existe — best-effort
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          # Supprime le tag local/distant orphelin si présent
+          git push origin ":refs/tags/$TAG" 2>/dev/null || true
+
+          gh release create "$TAG" \
+            --title "Fix72 Agent $TAG" \
+            --notes "Build automatique du $DATE — installez ou laissez l'agent se mettre à jour." \
+            dist/Fix72Agent-Setup.exe
+
+          echo "Release $TAG créée avec succès."

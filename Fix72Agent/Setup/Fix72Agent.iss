@@ -1,8 +1,14 @@
 ; Inno Setup script — Fix72 Agent
 ; Documentation : https://jrsoftware.org/ishelp/
+;
+; AppVersion peut être surchargé depuis la ligne de commande ISCC :
+;   ISCC /DAppVersion=0.1.5 Fix72Agent.iss
+; Le workflow GitHub Actions le fait automatiquement à chaque build.
 
 #define AppName       "Fix72 Agent"
-#define AppVersion    "0.1.4"
+#ifndef AppVersion
+  #define AppVersion  "0.1.4"
+#endif
 #define AppPublisher  "Fix72 - Etienne Aubry"
 #define AppURL        "https://fix72.com"
 #define AppExeName    "Fix72Agent.exe"
