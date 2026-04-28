@@ -11,14 +11,19 @@ public class TrayApplication : ApplicationContext
 {
     private readonly NotifyIcon _trayIcon;
     private readonly System.Windows.Forms.Timer _timer;
+    private readonly System.Windows.Forms.Timer _commandPollTimer;
     private readonly List<IMonitor> _monitors;
     private readonly SettingsService _settings;
+    private readonly AgentAuthService _auth;
+    private readonly Fix72ApiClient _api;
     private readonly WebhookReporter _webhook;
+    private readonly CommandExecutor _commandExec;
     private readonly Icon _iconGreen;
     private readonly Icon _iconOrange;
     private readonly Icon _iconRed;
     private readonly Dictionary<string, DateTime> _lastNotified = new();
     private readonly HashSet<string> _criticalAlertedIds = new();
+    private bool _polling = false;
 
     public List<MonitorResult> LatestResults { get; private set; } = new();
     public DateTime LastCheck { get; private set; }
@@ -29,7 +34,13 @@ public class TrayApplication : ApplicationContext
     public TrayApplication(SettingsService settings)
     {
         _settings = settings;
-        _webhook = new WebhookReporter(settings);
+        _auth = new AgentAuthService();
+        _api = new Fix72ApiClient(settings, _auth);
+        _webhook = new WebhookReporter(settings, _api);
+        _commandExec = new CommandExecutor(
+            onForceCheck: () => _ = CheckAllAsync(),
+            showNotification: (title, msg) => ShowBalloon(title, msg, ToolTipIcon.Info)
+        );
         _monitors = new List<IMonitor>
         {
             new DiskMonitor(),
@@ -64,7 +75,67 @@ public class TrayApplication : ApplicationContext
         _timer.Tick += async (s, e) => await CheckAllAsync();
         _timer.Start();
 
+        // Polling des commandes envoyées depuis /admin/agents
+        _commandPollTimer = new System.Windows.Forms.Timer
+        {
+            Interval = Math.Max(15, _settings.Settings.CommandPollIntervalSeconds) * 1000
+        };
+        _commandPollTimer.Tick += async (s, e) => await PollCommandsAsync();
+        if (_settings.Settings.RemoteCommandsEnabled && _api.IsConfigured)
+        {
+            _commandPollTimer.Start();
+        }
+
         _ = CheckAllAsync();
+    }
+
+    /// <summary>
+    /// Récupère et exécute les commandes en attente depuis le backend Fix72.
+    /// Tourne en boucle silencieuse en tâche de fond.
+    /// </summary>
+    private async Task PollCommandsAsync()
+    {
+        if (_polling) return;
+        _polling = true;
+        try
+        {
+            var commands = await _api.PollCommandsAsync();
+            if (commands.Count == 0) return;
+
+            Logger.Info($"Polling : {commands.Count} commande(s) reçue(s)");
+            foreach (var cmd in commands)
+            {
+                Logger.Info($"Exécution commande {cmd.Command} (id={cmd.Id})");
+                var res = await _commandExec.ExecuteAsync(cmd.Command, cmd.Params);
+                await _api.ReportResultAsync(cmd.Id, res.Status, res.Result, res.ErrorMessage);
+
+                // Si la commande a forcé un re-scan, l'icône doit refléter le nouvel état
+                if (cmd.Command == "force_check")
+                {
+                    await CheckAllAsync();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"PollCommandsAsync : {ex.Message}");
+        }
+        finally
+        {
+            _polling = false;
+        }
+    }
+
+    private void ShowBalloon(string title, string msg, ToolTipIcon icon)
+    {
+        try
+        {
+            _trayIcon.BalloonTipTitle = title;
+            _trayIcon.BalloonTipText = msg;
+            _trayIcon.BalloonTipIcon = icon;
+            _trayIcon.ShowBalloonTip(5000);
+        }
+        catch { /* best-effort */ }
     }
 
     private ContextMenuStrip BuildMenu()

@@ -9,13 +9,20 @@ public class WebhookReporter
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly SettingsService _settings;
+    private readonly Fix72ApiClient? _api;
 
-    public WebhookReporter(SettingsService settings)
+    public WebhookReporter(SettingsService settings, Fix72ApiClient? api = null)
     {
         _settings = settings;
+        _api = api;
     }
 
-    public bool IsConfigured => !string.IsNullOrWhiteSpace(_settings.Settings.WebhookUrl);
+    /// <summary>
+    /// True si on a au moins UN canal sortant : Make.com webhook OU Fix72 API.
+    /// </summary>
+    public bool IsConfigured =>
+        !string.IsNullOrWhiteSpace(_settings.Settings.WebhookUrl) ||
+        (_api?.IsConfigured ?? false);
 
     public Task<bool> SendDailyReportAsync(IReadOnlyList<MonitorResult> results, CancellationToken ct = default)
         => SendAsync("daily_report", results, alert: null, ct);
@@ -116,10 +123,10 @@ public class WebhookReporter
         CancellationToken ct,
         string? clientMessage = null)
     {
-        var url = _settings.Settings.WebhookUrl;
-        if (string.IsNullOrWhiteSpace(url)) return false;
-
-        if (!TryConsumeDailyQuota()) return false;
+        var makeUrl = _settings.Settings.WebhookUrl;
+        bool hasMake = !string.IsNullOrWhiteSpace(makeUrl);
+        bool hasApi = _api?.IsConfigured ?? false;
+        if (!hasMake && !hasApi) return false;
 
         var worstLevel = all.Count > 0 ? all.Max(r => r.Level) : AlertLevel.Ok;
         var alertCount = all.Count(r => r.Level >= AlertLevel.Warning);
@@ -172,20 +179,52 @@ public class WebhookReporter
             agent_version = version
         };
 
+        // ── Envoi parallèle : Make.com (emails) + Fix72 API (dashboard temps réel)
+        var tasks = new List<Task<bool>>();
+
+        // Make.com — passe par TryConsumeDailyQuota pour rester sous le plafond
+        if (hasMake && TryConsumeDailyQuota())
+        {
+            tasks.Add(SendMakeAsync(makeUrl, eventType, payload, ct));
+        }
+
+        // Fix72 API — pas de quota (notre propre backend)
+        if (hasApi)
+        {
+            tasks.Add(_api!.IngestAsync(payload, ct));
+        }
+
+        if (tasks.Count == 0) return false;
+
+        try
+        {
+            var results = await Task.WhenAll(tasks);
+            // succès si AU MOINS UN canal a accusé réception
+            return results.Any(r => r);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"SendAsync {eventType} : {ex.Message}");
+            return false;
+        }
+    }
+
+    private static async Task<bool> SendMakeAsync(string url, string eventType, object payload, CancellationToken ct)
+    {
         try
         {
             using var resp = await Http.PostAsJsonAsync(url, payload, ct);
             if (resp.IsSuccessStatusCode)
             {
-                Logger.Info($"Webhook envoyé : {eventType}");
+                Logger.Info($"Make.com webhook envoyé : {eventType}");
                 return true;
             }
-            Logger.Warn($"Webhook {eventType} : HTTP {(int)resp.StatusCode}");
+            Logger.Warn($"Make.com webhook {eventType} : HTTP {(int)resp.StatusCode}");
             return false;
         }
         catch (Exception ex)
         {
-            Logger.Warn($"Webhook {eventType} : {ex.Message}");
+            Logger.Warn($"Make.com webhook {eventType} : {ex.Message}");
             return false;
         }
     }

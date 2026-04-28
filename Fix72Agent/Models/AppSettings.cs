@@ -17,6 +17,20 @@ public class AppSettings
     // Pour désactiver pour un client spécifique : surcharger avec une chaîne vide dans settings.json.
     public string WebhookUrl { get; set; } = Defaults.WebhookUrl;
 
+    // ── Backend Fix72 (Supabase Edge Functions) ──────────────────
+    // URL racine des fonctions edge — typiquement
+    // https://blignipfcfiffstooexb.supabase.co/functions/v1
+    // Si vide, l'agent fonctionne en mode legacy "webhook seul" (pas de monitoring/commandes à distance).
+    public string Fix72ApiUrl { get; set; } = Defaults.Fix72ApiUrl;
+
+    // Active le polling des commandes envoyées depuis le dashboard admin.
+    public bool RemoteCommandsEnabled { get; set; } = true;
+
+    // Intervalle de polling des commandes en attente. 30 min par défaut.
+    // Soit 48 invocations/jour/agent → ~72 K invocations/mois pour 50 clients
+    // (largement sous les 500 K du free tier Supabase).
+    public int CommandPollIntervalSeconds { get; set; } = 1800;
+
     // Rapport quotidien (envoyé une fois par jour à DailyReportHour).
     public bool DailyReportEnabled { get; set; } = true;
     public int DailyReportHour { get; set; } = 9;

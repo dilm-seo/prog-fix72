@@ -22,4 +22,9 @@ public static class Defaults
 
     // Email du technicien (pour info, pas utilisé directement par l'app — c'est Make qui route).
     public const string TechnicianEmail = "etienne06080608@gmail.com";
+
+    // URL racine des Edge Functions Supabase qui hébergent le backend Fix72.
+    // Endpoints : /agent-ingest, /agent-poll, /agent-result
+    // Permet le monitoring temps réel et les commandes à distance depuis /admin/agents.
+    public const string Fix72ApiUrl = "https://blignipfcfiffstooexb.supabase.co/functions/v1";
 }
