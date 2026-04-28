@@ -2,7 +2,7 @@
 ; Documentation : https://jrsoftware.org/ishelp/
 
 #define AppName       "Fix72 Agent"
-#define AppVersion    "0.1.0"
+#define AppVersion    "0.1.1"
 #define AppPublisher  "Fix72 - Etienne Aubry"
 #define AppURL        "https://fix72.com"
 #define AppExeName    "Fix72Agent.exe"
@@ -20,7 +20,8 @@ DefaultDirName={autopf}\Fix72Agent
 DefaultGroupName=Fix72 Agent
 DisableProgramGroupPage=yes
 OutputDir=..\..\dist
-OutputBaseFilename=Fix72Agent-setup-{#AppVersion}
+; Filename stable (sans version) → URL React reste valide à chaque release future
+OutputBaseFilename=Fix72Agent-Setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern

@@ -10,9 +10,9 @@
 
     <AssemblyName>Fix72Agent</AssemblyName>
     <RootNamespace>Fix72Agent</RootNamespace>
-    <Version>0.1.0</Version>
-    <FileVersion>0.1.0.0</FileVersion>
-    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <Version>0.1.1</Version>
+    <FileVersion>0.1.1.0</FileVersion>
+    <AssemblyVersion>0.1.1.0</AssemblyVersion>
     <Company>Fix72 — Etienne Aubry</Company>
     <Product>Fix72 Agent</Product>
     <Description>Surveillance bienveillante du PC client — Fix72</Description>
@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="..\logo.png" Link="logo.png" LogicalName="Fix72Agent.logo.png" />
+    <EmbeddedResource Include="Resources\Clean-Disk.ps1" LogicalName="Fix72Agent.Resources.Clean-Disk.ps1" />
   </ItemGroup>
 
 </Project>

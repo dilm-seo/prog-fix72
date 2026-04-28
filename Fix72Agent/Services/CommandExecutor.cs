@@ -1,6 +1,9 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Runtime.Versioning;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Fix72Agent.Models;
 
 namespace Fix72Agent.Services;
@@ -58,60 +61,137 @@ public class CommandExecutor
     }
 
     // ── clean_temp ──────────────────────────────────────────────────
+    /// <summary>
+    /// Nettoyage de disque exhaustif via le script PowerShell embarqué Clean-Disk.ps1 :
+    /// caches dev (npm/pnpm/yarn/pip/gradle/maven/nuget/cargo/go/composer),
+    /// caches navigateurs (Chrome/Edge/Brave/Firefox/Opera/Vivaldi/Thorium tous profils),
+    /// caches IDE & apps Electron (VS Code, Cursor, JetBrains, Slack, Discord, Teams,
+    /// Spotify, Notion, Obsidian, Claude…), Temp Windows utilisateur, corbeille.
+    /// Phase admin sautée (l'agent tourne en user mode) — gain typique 1-15 Go.
+    /// </summary>
     private async Task<ExecutionResult> HandleCleanTempAsync(CancellationToken ct)
     {
-        long bytesFreed = 0;
-        int filesDeleted = 0;
-        int errors = 0;
-
-        var paths = new[]
+        // 1. Extraire le script depuis les ressources embarquées vers %TEMP%
+        var scriptPath = Path.Combine(Path.GetTempPath(), $"Fix72-Clean-Disk-{Guid.NewGuid():N}.ps1");
+        try
         {
-            Environment.ExpandEnvironmentVariables("%TEMP%"),
-            Environment.ExpandEnvironmentVariables("%LOCALAPPDATA%\\Temp"),
-            Environment.ExpandEnvironmentVariables("%LOCALAPPDATA%\\Microsoft\\Windows\\INetCache"),
-            Environment.ExpandEnvironmentVariables("%WINDIR%\\Temp"),
-        };
-
-        foreach (var p in paths)
+            var asm = Assembly.GetExecutingAssembly();
+            using var stream = asm.GetManifestResourceStream("Fix72Agent.Resources.Clean-Disk.ps1");
+            if (stream == null)
+            {
+                return new ExecutionResult("failed", null, "Resource Clean-Disk.ps1 introuvable dans le binaire");
+            }
+            using var fs = File.Create(scriptPath);
+            await stream.CopyToAsync(fs, ct);
+        }
+        catch (Exception ex)
         {
-            ct.ThrowIfCancellationRequested();
-            if (!Directory.Exists(p)) continue;
-
-            try
-            {
-                foreach (var f in Directory.EnumerateFiles(p, "*", SearchOption.AllDirectories))
-                {
-                    ct.ThrowIfCancellationRequested();
-                    try
-                    {
-                        var info = new FileInfo(f);
-                        var size = info.Length;
-                        info.Delete();
-                        bytesFreed += size;
-                        filesDeleted++;
-                    }
-                    catch
-                    {
-                        errors++; // fichiers verrouillés en cours d'utilisation = OK on saute
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"clean_temp dans {p} : {ex.Message}");
-                errors++;
-            }
+            return new ExecutionResult("failed", null, $"Extraction script : {ex.Message}");
         }
 
-        await Task.CompletedTask;
-        Logger.Info($"clean_temp : {filesDeleted} fichiers supprimés, {bytesFreed / 1024 / 1024} Mo libérés ({errors} ignorés)");
-        return new ExecutionResult("done", new
+        // 2. Lancer PowerShell avec le script (mode user uniquement, pas d'UAC)
+        var sb = new StringBuilder();
+        try
         {
-            files_deleted = filesDeleted,
-            bytes_freed = bytesFreed,
-            mb_freed = bytesFreed / 1024 / 1024,
-            files_skipped = errors,
-        }, null);
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = $"-NoProfile -ExecutionPolicy Bypass -NonInteractive -File \"{scriptPath}\" -Yes -NoElevate -SkipAdmin -SkipDism -SkipCleanmgr",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+
+            using var proc = Process.Start(psi);
+            if (proc == null) throw new Exception("Lancement powershell.exe échoué");
+
+            proc.OutputDataReceived += (_, e) => { if (e.Data != null) sb.AppendLine(e.Data); };
+            proc.ErrorDataReceived  += (_, e) => { if (e.Data != null) sb.AppendLine("[ERR] " + e.Data); };
+            proc.BeginOutputReadLine();
+            proc.BeginErrorReadLine();
+
+            // Timeout 10 minutes (les vrais cas tournent en 30 s à 3 min)
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromMinutes(10));
+            await proc.WaitForExitAsync(timeoutCts.Token);
+
+            var exit = proc.ExitCode;
+            var stdout = sb.ToString();
+
+            // 3. Parser le rapport final pour extraire :
+            //    - "Espace libre apres : X.X GB"
+            //    - "Total libere par le script  : X.X GB"
+            //    - "Gain disque        : X.X GB"
+            long? totalFreedBytes = ParseSizeLine(stdout, @"Total libere par le script\s*:\s*([\d,\.]+)\s*(B|KB|MB|GB)");
+            long? gainBytes        = ParseSizeLine(stdout, @"Gain disque\s*:\s*([\d,\.]+)\s*(B|KB|MB|GB)");
+            long? freeAfterBytes   = ParseSizeLine(stdout, @"Espace libre apres\s*:\s*([\d,\.]+)\s*(B|KB|MB|GB)");
+
+            // Top 10 (lignes apres "Top 10 plus gros postes")
+            var topMatches = Regex.Matches(stdout, @"^\s*([\d,\.]+\s*(?:B|KB|MB|GB))\s+(.+?)\s*$",
+                RegexOptions.Multiline);
+            var topFiltered = topMatches
+                .Cast<Match>()
+                .Where(m => stdout.IndexOf("Top 10", StringComparison.OrdinalIgnoreCase) >= 0
+                            && m.Index > stdout.IndexOf("Top 10", StringComparison.OrdinalIgnoreCase))
+                .Take(10)
+                .Select(m => new { size = m.Groups[1].Value.Trim(), label = m.Groups[2].Value.Trim() })
+                .ToArray();
+
+            // Tronque le log si trop gros
+            var logTrunc = stdout.Length > 4000 ? stdout[^4000..] : stdout;
+
+            Logger.Info($"clean_temp (deep) : exit={exit} freed={totalFreedBytes ?? 0} bytes");
+
+            return new ExecutionResult(
+                exit == 0 ? "done" : "failed",
+                new
+                {
+                    exit_code = exit,
+                    bytes_freed = totalFreedBytes,
+                    mb_freed = totalFreedBytes.HasValue ? totalFreedBytes.Value / 1024 / 1024 : (long?)null,
+                    gb_freed = totalFreedBytes.HasValue ? Math.Round(totalFreedBytes.Value / 1024.0 / 1024.0 / 1024.0, 2) : (double?)null,
+                    disk_gain_bytes = gainBytes,
+                    free_after_bytes = freeAfterBytes,
+                    top_targets = topFiltered,
+                    log_tail = logTrunc,
+                },
+                exit == 0 ? null : $"PowerShell exit code {exit}");
+        }
+        catch (OperationCanceledException)
+        {
+            return new ExecutionResult("failed", null, "Timeout (>10 min) — script trop long");
+        }
+        catch (Exception ex)
+        {
+            return new ExecutionResult("failed", null, $"Exécution script : {ex.Message}");
+        }
+        finally
+        {
+            try { if (File.Exists(scriptPath)) File.Delete(scriptPath); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// Extrait une valeur en bytes depuis une ligne du type "X.X GB" / "X.X MB".
+    /// Le script PS utilise la virgule française comme séparateur décimal — on gère les deux.
+    /// </summary>
+    private static long? ParseSizeLine(string text, string regex)
+    {
+        var m = Regex.Match(text, regex, RegexOptions.IgnoreCase);
+        if (!m.Success) return null;
+        var raw = m.Groups[1].Value.Replace(',', '.').Replace(" ", "");
+        if (!double.TryParse(raw, System.Globalization.NumberStyles.Any,
+                             System.Globalization.CultureInfo.InvariantCulture, out double val))
+            return null;
+        var unit = m.Groups[2].Value.ToUpperInvariant();
+        return unit switch
+        {
+            "GB" => (long)(val * 1024 * 1024 * 1024),
+            "MB" => (long)(val * 1024 * 1024),
+            "KB" => (long)(val * 1024),
+            _    => (long)val,
+        };
     }
 
     // ── empty_recycle_bin ───────────────────────────────────────────
