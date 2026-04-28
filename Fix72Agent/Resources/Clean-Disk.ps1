@@ -155,7 +155,9 @@ function Clean-Path {
   $sizeAfter = Get-FolderSize $Path
   $freed = [math]::Max(0, $sizeBefore - $sizeAfter)
 
-  Write-Step ("$Label : libere " + (Format-Size $freed) + (if ($sizeAfter -gt 0) { " (reste " + (Format-Size $sizeAfter) + ")" } else { "" }))
+  $leftStr = ""
+  if ($sizeAfter -gt 0) { $leftStr = " (reste " + (Format-Size $sizeAfter) + ")" }
+  Write-Step ("$Label : libere " + (Format-Size $freed) + $leftStr)
   [void]$script:results.Add([PSCustomObject]@{
     Label = $Label; Action = 'clean'; Reason = '';
     FreedBytes = $freed; LeftBytes = $sizeAfter; Path = $Path
