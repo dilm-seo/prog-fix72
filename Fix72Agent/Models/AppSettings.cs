@@ -19,7 +19,7 @@ public class AppSettings
 
     // ── Backend Fix72 (Supabase Edge Functions) ──────────────────
     // URL racine des fonctions edge — typiquement
-    // https://blignipfcfiffstooexb.supabase.co/functions/v1
+    // https://juqxtwqwzhtermlesoaj.supabase.co/functions/v1
     // Si vide, l'agent fonctionne en mode legacy "webhook seul" (pas de monitoring/commandes à distance).
     public string Fix72ApiUrl { get; set; } = Defaults.Fix72ApiUrl;
 

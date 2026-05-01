@@ -31,6 +31,8 @@ public class Fix72ApiClient
 
     private void AddAuthHeaders(HttpRequestMessage req)
     {
+        req.Headers.Add("apikey", Defaults.Fix72ApiKey);
+        req.Headers.Add("Authorization", $"Bearer {Defaults.Fix72ApiKey}");
         req.Headers.Add("X-Agent-Id", _auth.AgentId);
         req.Headers.Add("X-Agent-Secret", _auth.AgentSecret);
     }

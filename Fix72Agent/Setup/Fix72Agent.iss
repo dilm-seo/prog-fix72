@@ -7,7 +7,7 @@
 
 #define AppName       "Fix72 Agent"
 #ifndef AppVersion
-  #define AppVersion  "0.1.4"
+  #define AppVersion  "0.1.5"
 #endif
 #define AppPublisher  "Fix72 - Etienne Aubry"
 #define AppURL        "https://fix72.com"
