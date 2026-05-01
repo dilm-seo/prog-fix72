@@ -10,9 +10,9 @@
 
     <AssemblyName>Fix72Agent</AssemblyName>
     <RootNamespace>Fix72Agent</RootNamespace>
-    <Version>0.1.6</Version>
-    <FileVersion>0.1.6.0</FileVersion>
-    <AssemblyVersion>0.1.6.0</AssemblyVersion>
+    <Version>0.1.7</Version>
+    <FileVersion>0.1.7.0</FileVersion>
+    <AssemblyVersion>0.1.7.0</AssemblyVersion>
     <Company>Fix72 — Etienne Aubry</Company>
     <Product>Fix72 Agent</Product>
     <Description>Surveillance bienveillante du PC client — Fix72</Description>
