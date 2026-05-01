@@ -42,6 +42,16 @@ public class SettingsService
     {
         bool changed = false;
 
+        // Migration : remplace l'URL de l'ancien projet Supabase (banni) par le nouveau.
+        // Se déclenche automatiquement dès que l'agent démarre avec un settings.json hérité.
+        const string OldApiUrl = "https://blignipfcfiffstooexb.supabase.co/functions/v1";
+        if (Settings.Fix72ApiUrl == OldApiUrl)
+        {
+            Logger.Info($"Migration URL Supabase : {OldApiUrl} → {Defaults.Fix72ApiUrl}");
+            Settings.Fix72ApiUrl = Defaults.Fix72ApiUrl;
+            changed = true;
+        }
+
         if (Settings.CheckIntervalMinutes < 5)
         {
             Logger.Warn($"CheckIntervalMinutes={Settings.CheckIntervalMinutes} < 5, forcé à 5.");

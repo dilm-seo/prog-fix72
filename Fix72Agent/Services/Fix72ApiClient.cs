@@ -23,6 +23,7 @@ public class Fix72ApiClient
     {
         _settings = settings;
         _auth = auth;
+        Logger.Info($"Fix72ApiClient initialisé — URL : {settings.Settings.Fix72ApiUrl}");
     }
 
     public bool IsConfigured => !string.IsNullOrWhiteSpace(_settings.Settings.Fix72ApiUrl);
@@ -55,7 +56,7 @@ public class Fix72ApiClient
                 return true;
             }
             var body = await resp.Content.ReadAsStringAsync(ct);
-            Logger.Warn($"Fix72 API ingest HTTP {(int)resp.StatusCode} : {body}");
+            Logger.Warn($"Fix72 API ingest HTTP {(int)resp.StatusCode} — URL: {BaseUrl}/agent-ingest — body: {body}");
             return false;
         }
         catch (Exception ex)
@@ -78,9 +79,10 @@ public class Fix72ApiClient
             using var resp = await Http.SendAsync(req, ct);
             if (!resp.IsSuccessStatusCode)
             {
-                if ((int)resp.StatusCode != 404) // 404 = agent pas encore enregistré
+                if ((int)resp.StatusCode != 404)
                 {
-                    Logger.Warn($"Fix72 API poll HTTP {(int)resp.StatusCode}");
+                    var errBody = await resp.Content.ReadAsStringAsync(ct);
+                    Logger.Warn($"Fix72 API poll HTTP {(int)resp.StatusCode} — URL: {BaseUrl}/agent-poll — body: {errBody}");
                 }
                 return Array.Empty<PendingCommand>();
             }
